@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flask-app-sa
+  namespace: k8s-helm
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: flask-app-role
+  namespace: k8s-helm
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]     # can read pods, not delete them
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: flask-app-rolebinding
+  namespace: k8s-helm
+subjects:
+- kind: ServiceAccount
+  name: flask-app-sa
+  namespace: k8s-helm
+roleRef:
+  kind: Role
+  name: flask-app-role        
+  apiGroup: rbac.authorization.k8s.io

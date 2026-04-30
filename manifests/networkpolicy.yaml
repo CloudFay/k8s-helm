@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-allow-flask-only
+  namespace: k8s-helm
+spec:
+  podSelector:
+    matchLabels:
+      app: redis           # this policy applies TO redis pods
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: flask-app   # only FROM flask-app pods
+    ports:
+    - protocol: TCP
+      port: 6379
