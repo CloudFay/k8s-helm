@@ -1,4 +1,4 @@
-name: Build and Push to ECR
+name: Build, Scan and Push to ECR
 
 on:
   push:
@@ -11,9 +11,13 @@ env:
   ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
 
 jobs:
+  # ──────────────────────────────────────────
+  # JOB 1: Run tests + scan dependencies
+  # ──────────────────────────────────────────
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -24,23 +28,82 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: |
-          pip install -r app/requirements.txt
+        run: pip install -r app/requirements.txt
 
       - name: Run tests
-        run: |
-          cd app && python -m pytest test_app.py -v
+        run: cd app && python -m pytest test_app.py -v
 
-  build-and-push:
-    name: Build and Push Image
+      # Scan requirements.txt AFTER checkout + install so Trivy
+      # can resolve the full dependency tree, not just the lockfile
+      - name: Scan dependencies (requirements.txt)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: fs
+          scan-ref: app/requirements.txt   # target the file explicitly
+          severity: HIGH,CRITICAL
+          exit-code: 1
+
+  # ──────────────────────────────────────────
+  # JOB 2: Build image once, scan it, upload
+  #         the exact same artifact for pushing
+  # ──────────────────────────────────────────
+  build-and-scan:
+    name: Build and Scan Image
     runs-on: ubuntu-latest
-    needs: test          # only runs if tests pass
-    if: github.ref == 'refs/heads/main'   # only on main branch, not PRs
+    needs: test
+
+    outputs:
+      image_tag: ${{ steps.tag.outputs.IMAGE_TAG }}   # share tag with push job
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Generate image tag
+        id: tag
+        run: |
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          echo "IMAGE_TAG=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "LOCAL_IMAGE=devops-lab:${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            --build-arg APP_VERSION=${{ steps.tag.outputs.IMAGE_TAG }} \
+            -t ${{ steps.tag.outputs.LOCAL_IMAGE }} \
+            .
+
+      - name: Scan image (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ steps.tag.outputs.LOCAL_IMAGE }}
+          format: table
+          exit-code: 1
+          severity: HIGH,CRITICAL
+
+      # Save the scanned image as a tar so the push job uses
+      # exactly the same bits — not a fresh rebuild
+      - name: Save image as artifact
+        run: docker save ${{ steps.tag.outputs.LOCAL_IMAGE }} -o image.tar
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: image.tar
+          retention-days: 1    # only needed for the duration of this workflow
+
+  # ──────────────────────────────────────────
+  # JOB 3: Push the already-scanned image to ECR
+  #         Only runs on main branch, not PRs
+  # ──────────────────────────────────────────
+  push-to-ecr:
+    name: Push to ECR
+    runs-on: ubuntu-latest
+    needs: build-and-scan
+    if: github.ref == 'refs/heads/main'
+
+    steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -49,30 +112,30 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Log in to Amazon ECR
-        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Generate image tag
-        id: tag
-        run: |
-          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-          echo "IMAGE_TAG=${SHORT_SHA}" >> $GITHUB_OUTPUT
-          echo "FULL_IMAGE=${{ env.ECR_REPOSITORY }}:${SHORT_SHA}" >> $GITHUB_OUTPUT
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
 
-      - name: Build Docker image
+      # Load the saved image and retag it with the ECR URI
+      - name: Load and retag image
         run: |
-          docker build \
-            --build-arg APP_VERSION=${{ steps.tag.outputs.IMAGE_TAG }} \
-            -t ${{ steps.tag.outputs.FULL_IMAGE }} \
-            -t ${{ env.ECR_REPOSITORY }}:latest \
-            .
+          docker load -i image.tar
+          docker tag \
+            devops-lab:${{ needs.build-and-scan.outputs.image_tag }} \
+            ${{ env.ECR_REPOSITORY }}:${{ needs.build-and-scan.outputs.image_tag }}
+          docker tag \
+            devops-lab:${{ needs.build-and-scan.outputs.image_tag }} \
+            ${{ env.ECR_REPOSITORY }}:latest
 
       - name: Push to ECR
         run: |
-          docker push ${{ steps.tag.outputs.FULL_IMAGE }}
+          docker push ${{ env.ECR_REPOSITORY }}:${{ needs.build-and-scan.outputs.image_tag }}
           docker push ${{ env.ECR_REPOSITORY }}:latest
 
       - name: Output image details
         run: |
-          echo "Image pushed: ${{ steps.tag.outputs.FULL_IMAGE }}"
-          echo "Also tagged as: ${{ env.ECR_REPOSITORY }}:latest"
+          echo "✅ Image pushed: ${{ env.ECR_REPOSITORY }}:${{ needs.build-and-scan.outputs.image_tag }}"
+          echo "✅ Also tagged:  ${{ env.ECR_REPOSITORY }}:latest"
