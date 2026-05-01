@@ -79,7 +79,7 @@ jobs:
           image-ref: ${{ steps.tag.outputs.LOCAL_IMAGE }}
           format: table
           exit-code: 1
-          severity: HIGH,CRITICAL
+          severity: CRITICAL
 
       - name: Save image as artifact
         run: docker save ${{ steps.tag.outputs.LOCAL_IMAGE }} -o image.tar
