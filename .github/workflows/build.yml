@@ -36,7 +36,7 @@ jobs:
       # Scan requirements.txt AFTER checkout + install so Trivy
       # can resolve the full dependency tree, not just the lockfile
       - name: Scan dependencies (requirements.txt)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
           scan-ref: app/requirements.txt
@@ -74,7 +74,7 @@ jobs:
             .
 
       - name: Scan image (fail on HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ steps.tag.outputs.LOCAL_IMAGE }}
           format: table
