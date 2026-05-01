@@ -36,10 +36,10 @@ jobs:
       # Scan requirements.txt AFTER checkout + install so Trivy
       # can resolve the full dependency tree, not just the lockfile
       - name: Scan dependencies (requirements.txt)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: fs
-          scan-ref: app/requirements.txt   # target the file explicitly
+          scan-ref: app/requirements.txt
           severity: HIGH,CRITICAL
           exit-code: 1
 
@@ -53,7 +53,7 @@ jobs:
     needs: test
 
     outputs:
-      image_tag: ${{ steps.tag.outputs.IMAGE_TAG }}   # share tag with push job
+      image_tag: ${{ steps.tag.outputs.IMAGE_TAG }}
 
     steps:
       - name: Checkout code
@@ -74,15 +74,13 @@ jobs:
             .
 
       - name: Scan image (fail on HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: ${{ steps.tag.outputs.LOCAL_IMAGE }}
           format: table
           exit-code: 1
           severity: HIGH,CRITICAL
 
-      # Save the scanned image as a tar so the push job uses
-      # exactly the same bits — not a fresh rebuild
       - name: Save image as artifact
         run: docker save ${{ steps.tag.outputs.LOCAL_IMAGE }} -o image.tar
 
@@ -91,7 +89,7 @@ jobs:
         with:
           name: docker-image
           path: image.tar
-          retention-days: 1    # only needed for the duration of this workflow
+          retention-days: 1
 
   # ──────────────────────────────────────────
   # JOB 3: Push the already-scanned image to ECR
@@ -119,7 +117,6 @@ jobs:
         with:
           name: docker-image
 
-      # Load the saved image and retag it with the ECR URI
       - name: Load and retag image
         run: |
           docker load -i image.tar
