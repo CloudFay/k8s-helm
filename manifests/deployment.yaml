@@ -16,7 +16,7 @@ spec:
       serviceAccountName: flask-app-sa
       containers:
       - name: flask-app
-        image: k8s-helm:v4
+        image: k8s-helm:latest
         imagePullPolicy: Never
 
         ports:
